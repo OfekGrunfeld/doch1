@@ -1,0 +1,63 @@
+[project]
+name = "doch1"
+version = "2.0.0"
+description = "IDF DOCH1 (דו\"ח 1) presence reporter + history viewer for one.prat.idf.il"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31",
+    "typer>=0.12",
+    "pyotp>=2.9",
+    "playwright>=1.44",
+    "rich>=13.0",
+    "textual>=0.60",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6", "mypy>=1.11"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+# demo/ is promo + render scratch (one-off Textual capture app, ffmpeg logs),
+# not shipped project code; keep it out of lint/format so `ruff check .` and
+# `ruff format --check .` stay green in CI on the source + tests only.
+extend-exclude = ["demo"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]  # pycodestyle, pyflakes, isort, pyupgrade, bugbear
+
+[tool.mypy]
+files = "src/doch1"
+ignore_missing_imports = true  # playwright/textual/typer stubs are partial
+check_untyped_defs = true
+warn_unused_ignores = true
+# Permissive by design; tighten per-module as types harden. The pure-logic
+# modules (api, cli, cron, dates, render, statuses, tui.data, tui.modals) ARE
+# typechecked — that is where type bugs actually bite. The modules below are
+# dominated by partially-typed third-party surfaces (Playwright's lazy sync_api
+# on session.py; Textual's dynamic App/Screen attributes on the TUI screens),
+# so their errors are framework noise, not real bugs. Ignore them per-module
+# rather than weakening the whole config.
+[[tool.mypy.overrides]]
+module = ["doch1.session", "doch1.tui.screens", "doch1.tui.app"]
+ignore_errors = true
+
+[project.scripts]
+doch1 = "doch1.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/doch1"]
+
+# Keep the sdist lean: the demo/ dir holds a large promo mp4 + render scratch
+# that has no place in a release artifact (it ballooned the sdist to ~113 MB).
+[tool.hatch.build.targets.sdist]
+exclude = ["/demo", "/.github"]

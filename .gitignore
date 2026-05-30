@@ -1,0 +1,38 @@
+# Secrets / local config
+.env
+.env.*
+**/auth.json
+
+# Internal / non-source material (not for publication)
+demo/
+plans/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Media & recordings
+*.mkv
+*.mp4
+*.wav
+*.cast
+*.gif
+*.onnx
+*.srt
+
+# Logs
+*.log
+
+# Workflow / automation scripts
+*.js
+
+# Python caches & virtualenvs
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
