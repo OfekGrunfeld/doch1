@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      # Locked deps from uv.lock. NO `playwright install` — CI never launches a
+      # browser; sync_playwright() is lazy inside BrowserClient.__enter__ /
+      # login(), and every test uses FakeClient / FakePage doubles instead.
+      - name: sync (dev extras, no browser)
+        run: uv sync --extra dev
+
+      - name: ruff lint
+        run: uv run ruff check .
+
+      - name: ruff format check
+        run: uv run ruff format --check .
+
+      - name: mypy
+        run: uv run mypy src/doch1
+
+      - name: pytest (hermetic only)
+        env:
+          # _should_launch_ui() honors CI / DOCH1_NONINTERACTIVE -> never opens
+          # the TUI; conftest blocks the network and points DOCH1_STATE /
+          # DOCH1_ENV at throwaway tmp paths. No secrets, no network, no browser.
+          CI: "1"
+          DOCH1_NONINTERACTIVE: "1"
+        run: uv run pytest -q

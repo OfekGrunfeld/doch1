@@ -1,0 +1,38 @@
+name: release
+
+# Private tool: tag-triggered build that publishes the wheel + sdist as GitHub
+# Release artifacts (NOT PyPI). Tag a release with `git tag vX.Y.Z && git push --tags`.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: sync (dev extras)
+        run: uv sync --extra dev
+
+      # Never release a red tree. Same hermetic gates as ci.yml.
+      - name: pytest (hermetic only)
+        env:
+          CI: "1"
+          DOCH1_NONINTERACTIVE: "1"
+        run: uv run pytest -q
+
+      - name: build wheel + sdist
+        run: uv build  # -> dist/*.whl, dist/*.tar.gz
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
