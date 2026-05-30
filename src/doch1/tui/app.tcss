@@ -1,0 +1,133 @@
+/* doch1 interactive UI — calm palette, named colors adapt to terminal theme. */
+
+Screen {
+    background: $surface;
+}
+
+#body {
+    height: 1fr;
+}
+
+#nav {
+    width: 18;
+    border-right: solid $primary;
+    background: $panel;
+}
+
+#nav > ListItem {
+    padding: 0 1;
+    color: $text-muted;
+}
+
+#nav > ListItem.--highlight {
+    color: $text;
+    text-style: bold;
+    background: $boost;
+}
+
+#nav > ListItem.--highlight Label {
+    text-style: bold;
+}
+
+#main {
+    padding: 1 2;
+    height: 1fr;
+}
+
+.screen-title {
+    text-style: bold;
+    color: $accent;
+    padding: 0 0 1 0;
+}
+
+.screen-overline {
+    color: $text-muted;
+    text-style: dim;
+    padding: 0;
+}
+
+#cal-nav {
+    text-align: center;
+    text-style: bold;
+    padding: 0 0 1 0;
+    color: $accent;
+}
+
+#cal-nav-hints {
+    color: $text-muted;
+    padding: 0 0 1 0;
+    text-align: center;
+}
+
+.card {
+    border: round $primary;
+    padding: 1 2;
+    margin: 0 0 1 0;
+}
+
+.actionbar {
+    color: $text-muted;
+    padding: 1 0 0 0;
+}
+
+.hidden {
+    display: none;
+}
+
+DataTable {
+    height: auto;
+    max-height: 1fr;
+}
+
+DataTable > .datatable--cursor {
+    background: $accent;
+    color: $text;
+}
+
+#cal-table {
+    height: auto;
+}
+
+#cal-table > .datatable--cursor {
+    background: $accent;
+    color: $text;
+}
+
+#cal-legend {
+    padding: 0 0 1 0;
+}
+
+LoadingIndicator {
+    height: 1;
+    margin: 1 0;
+}
+
+/* ---- modals ---- */
+
+ConfirmModal, HelpModal {
+    align: center middle;
+}
+
+#confirm-box, #help-box {
+    width: 60;
+    max-width: 90%;
+    height: auto;
+    border: thick $accent;
+    background: $panel;
+    padding: 1 2;
+}
+
+#confirm-title, #help-title {
+    text-style: bold;
+    color: $accent;
+    padding: 0 0 1 0;
+}
+
+#confirm-hint, #help-hint {
+    color: $text-muted;
+    padding: 1 0 0 0;
+}
+
+#confirm-box Button {
+    margin: 1 1 0 0;
+}
