@@ -251,10 +251,11 @@ async def test_help_opens_and_quit():
 # with session.login monkeypatched (no Playwright/browser). app.suspend() and
 # the TTY gate are stubbed because Pilot has no controlling terminal.
 
-import contextlib
+import contextlib  # noqa: E402
 
-from doch1.api import Doch1Error
-from doch1.tui.app import DataService, Doch1App as _RealApp
+from doch1.api import Doch1Error  # noqa: E402
+from doch1.tui.app import DataService  # noqa: E402
+from doch1.tui.app import Doch1App as _RealApp  # noqa: E402
 
 
 @contextlib.contextmanager
@@ -344,9 +345,7 @@ async def test_login_doch1error_is_surfaced_not_raised(monkeypatch):
     notes = []
     async with app.run_test() as pilot:
         await _goto_status(pilot, app)
-        monkeypatch.setattr(
-            app, "notify", lambda *a, **k: notes.append((a, k)), raising=False
-        )
+        monkeypatch.setattr(app, "notify", lambda *a, **k: notes.append((a, k)), raising=False)
         # Must NOT raise out of the binding handler / crash the app.
         await pilot.press("l")
         await pilot.pause(0.3)

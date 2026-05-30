@@ -6,39 +6,72 @@ on:
   pull_request:
     branches: [main]
 
+# Auto-cancel superseded runs on the same ref (push/PR update). Saves runner
+# minutes — the single cheapest efficiency win. CI never publishes, so it is
+# always safe to cancel in-flight.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: CI only reads the repo (no pushes, no comments, no releases).
 permissions:
   contents: read
 
 jobs:
   quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 80/20 endpoints only: the declared floor (3.10, guards against
+        # accidental 3.11+ syntax/stdlib) and the current stable ceiling
+        # (3.13, guards against deprecations). The 3.11/3.12 middle is skipped
+        # — it virtually never reveals a bug the endpoints miss.
+        python-version: ["3.10", "3.13"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@557e51de59eb14aaaba2ed9621916900a91d50c6 # v6.6.1
         with:
           enable-cache: true
+          # Pin the uv tool itself for byte-reproducible resolution.
+          version: "0.9.21"
+          python-version: ${{ matrix.python-version }}
 
-      # Locked deps from uv.lock. NO `playwright install` — CI never launches a
-      # browser; sync_playwright() is lazy inside BrowserClient.__enter__ /
-      # login(), and every test uses FakeClient / FakePage doubles instead.
-      - name: sync (dev extras, no browser)
-        run: uv sync --extra dev
+      # Locked, reproducible deps from uv.lock (--frozen: never re-resolve).
+      # NO `playwright install` — CI never launches a browser. sync_playwright()
+      # is lazy inside BrowserClient.__enter__ / login(), and every test uses
+      # FakeClient / FakePage doubles instead.
+      - name: sync (dev extras, locked, no browser)
+        run: uv sync --extra dev --frozen
 
+      # Static checks run on ONE leg only (3.13) — they are version-invariant,
+      # so running them on both legs is pure 2x redundancy.
       - name: ruff lint
+        if: matrix.python-version == '3.13'
         run: uv run ruff check .
 
       - name: ruff format check
+        if: matrix.python-version == '3.13'
         run: uv run ruff format --check .
 
       - name: mypy
+        if: matrix.python-version == '3.13'
         run: uv run mypy src/doch1
 
+      # Packaging smoke on a single leg: catches sdist/wheel breaks on PRs
+      # instead of only at tag time. Hermetic (no network beyond the build).
+      - name: build wheel + sdist (packaging smoke)
+        if: matrix.python-version == '3.13'
+        run: uv build
+
+      # The 156 hermetic pytest + Textual Pilot tests run on BOTH endpoints.
+      # _should_launch_ui() honors CI / DOCH1_NONINTERACTIVE -> never opens the
+      # TUI; conftest blocks the network and points DOCH1_STATE / DOCH1_ENV at
+      # throwaway tmp paths. No secrets, no network, no browser.
       - name: pytest (hermetic only)
         env:
-          # _should_launch_ui() honors CI / DOCH1_NONINTERACTIVE -> never opens
-          # the TUI; conftest blocks the network and points DOCH1_STATE /
-          # DOCH1_ENV at throwaway tmp paths. No secrets, no network, no browser.
           CI: "1"
           DOCH1_NONINTERACTIVE: "1"
         run: uv run pytest -q

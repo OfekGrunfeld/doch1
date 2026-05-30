@@ -17,7 +17,6 @@ from conftest import FakeClient
 
 from doch1 import api, cli
 
-
 # ---------- 1. malformed server dates must not crash ----------
 
 
@@ -25,12 +24,12 @@ from doch1 import api, cli
     "bad_date",
     [
         "not-a-date",
-        "2026-13-45",          # impossible month/day
-        "",                    # empty
-        "32.01.2026",          # wrong format entirely
-        "2026/01/01",          # slashes
-        "\x00\x1bgarbage",     # control chars / ANSI
-        12345,                 # not even a string (TypeError territory)
+        "2026-13-45",  # impossible month/day
+        "",  # empty
+        "32.01.2026",  # wrong format entirely
+        "2026/01/01",  # slashes
+        "\x00\x1bgarbage",  # control chars / ANSI
+        12345,  # not even a string (TypeError territory)
         None,
         {"nested": "obj"},
     ],
@@ -73,9 +72,7 @@ def test_scheduled_window_skips_malformed_dates_and_bounds():
 
 
 def test_scheduled_window_good_bounds_parse():
-    c = FakeClient(
-        json_reply={"days": [], "minDate": "2026-05-01", "maxDate": "2026-05-31"}
-    )
+    c = FakeClient(json_reply={"days": [], "minDate": "2026-05-01", "maxDate": "2026-05-31"})
     _, min_d, max_d = api.scheduled_window(c, {(5, 2026)})
     assert min_d.isoformat() == "2026-05-01"
     assert max_d.isoformat() == "2026-05-31"
