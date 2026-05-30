@@ -9,6 +9,10 @@ Imperva WAF and Microsoft Entra login are handled for you.
 > **Do not use doch1 to falsify presence.** A דו"ח 1 / DOCH1 is an official military declaration; submitting a false one can constitute fraud and may expose you to disciplinary action, criminal prosecution, and imprisonment. Use it only on days you are genuinely present. doch1 is **unofficial** and **not affiliated with or endorsed by** the IDF, the Israeli Ministry of Defense, Microsoft, or the operators of `one.prat.idf.il`. Provided **"AS IS"**, with no warranty, and automating the site may violate its Terms of Use. You are solely responsible for the truth of every report and for your own credentials. This is not legal advice.
 > See [`./LEGAL.md`](./LEGAL.md) for the full terms — by using doch1 you accept them.
 
+<p align="center"><img src="docs/tui.png" alt="doch1 interactive TUI — calendar month view" width="800"></p>
+
+*The keyboard-driven TUI — month calendar with reported + scheduled days, conflicts flagged.*
+
 It is also a clean, exit-code-stable backend: every command takes `--json` and
 returns stable exit codes (`0` ok, `1` fail) so an agent can drive it.
 
