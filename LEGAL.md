@@ -39,6 +39,10 @@ doch1 is **not** affiliated with, authorized by, endorsed, sponsored by, or conn
 
 doch1 exists for one purpose: to save time for soldiers who **are genuinely present and entitled to report so**, by automating a tedious daily form. That's it. It is **not** a tool to fabricate, simulate, pre-schedule, or backfill presence that isn't true, and it is not designed or intended to be used that way. Using it for anything else is outside its purpose and entirely on you.
 
+**The canonical, blessed pattern is AI-native and human-in-the-loop:** a soldier who **is genuinely present** instructs their AI agent (e.g. the Hermes agent or Claude Code) **each morning** to file that day's doch1. This is the recommended pattern precisely *because* the human affirms their presence anew every morning at the moment they trigger it — an explicit, per-day instruction to automate a **truthful** report. The automation does the busywork; the daily human confirmation keeps the declaration honest.
+
+**A caution on unattended scheduling:** fully-unattended scheduling (e.g. cron) files "present" **without** a daily human confirmation. It should therefore only be enabled by someone who is reliably present on the scheduled days, and it must **never** be used to assert presence on days you are — or may be — absent. This does not weaken §5: truthfulness remains mandatory regardless of how a report is triggered.
+
 ---
 
 ## 5. ⚠️ NO FALSIFICATION — Truthfulness Is Mandatory
