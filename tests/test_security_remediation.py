@@ -142,9 +142,10 @@ def test_alert_payload_sanitized_end_to_end(monkeypatch):
     """Even if a caller passes raw text, the outbound Telegram body is cleaned."""
     captured = {}
 
-    def _fake_post(url, data=None, timeout=None):
+    def _fake_post(url, data=None, timeout=None, **kwargs):
         captured["url"] = url
         captured["text"] = data["text"]
+        captured["kwargs"] = kwargs
 
         class _R:
             pass
@@ -159,6 +160,9 @@ def test_alert_payload_sanitized_end_to_end(monkeypatch):
     assert "\n" not in captured["text"] and "\r" not in captured["text"]
     assert "\x1b" not in captured["text"]
     assert len(captured["text"]) <= 120
+    # Telegram POST must pin the host and never follow a redirect (token leak).
+    assert captured["url"].startswith("https://api.telegram.org/")
+    assert captured["kwargs"].get("allow_redirects") is False
 
 
 # ---------- server-response leak guard at the transport layer ----------

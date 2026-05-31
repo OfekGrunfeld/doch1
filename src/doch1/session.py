@@ -27,6 +27,22 @@ from pathlib import Path
 from .api import BASE, Doch1Error
 
 
+def _is_app_url(u: str) -> bool:
+    """True iff `u` is genuinely on the authenticated app origin.
+
+    SECURITY: the old check used ``"one.prat.idf.il" in u`` (substring), which a
+    crafted URL like ``https://evil.com/one.prat.idf.il`` would satisfy. We bind
+    to the real origin with a prefix/exact match instead, and still require that
+    we are no longer on the Microsoft login origin or the app's /login page.
+    """
+    if not isinstance(u, str):
+        return False
+    on_origin = u == BASE or u.startswith(BASE + "/")
+    return (
+        on_origin and "login.microsoftonline.com" not in u and not u.rstrip("/").endswith("/login")
+    )
+
+
 def _fill_field(page, selector, value, submit_selector=None) -> str:
     """Three-way fill classifier — the building block for the autofill guard.
 
@@ -318,9 +334,11 @@ def _verify_authenticated(ctx) -> bool:
 
 
 def state_path() -> Path:
+    from .api import safe_override_path
+
     override = os.environ.get("DOCH1_STATE")
     if override:
-        return Path(override)
+        return safe_override_path(override, var="DOCH1_STATE")
     return Path.home() / ".config" / "doch1" / "auth.json"
 
 
@@ -524,12 +542,7 @@ def login(
                 page.wait_for_timeout(1500)
 
             def _is_authed() -> bool:
-                u = page.url
-                return (
-                    "one.prat.idf.il" in u
-                    and "login.microsoftonline.com" not in u
-                    and not u.rstrip("/").endswith("/login")
-                )
+                return _is_app_url(page.url)
 
             # Reach the SMS one-time-code box (reuse the OTC-wait / method-picker
             # logic), unless the browser is already back on the app.
@@ -728,9 +741,15 @@ def login(
             filled_via_totp = False
             if otc is not None and totp_seed and otp_callback is None:
                 try:
+                    # Use explicit UTC so a DST gap / naive-local mktime edge case
+                    # can't produce the wrong code (which would silently fall back
+                    # to SMS). pyotp derives the counter from the unix timestamp.
+                    from datetime import datetime, timezone
+
                     import pyotp
 
-                    otc.fill(pyotp.TOTP(totp_seed.replace(" ", "")).now())
+                    code = pyotp.TOTP(totp_seed.replace(" ", "")).at(datetime.now(timezone.utc))
+                    otc.fill(code)
                     page.click(SEL_OTC_SUBMIT, timeout=5000)
                     filled_via_totp = True
                 except Exception:
@@ -742,6 +761,22 @@ def login(
                 if otp_callback is not None:
                     code = str(otp_callback()).strip()
                 else:
+                    # SECURITY/robustness: a bare input() in a non-TTY context
+                    # (cron / CI / piped) blocks forever — only SIGKILL recovers.
+                    # Fail fast instead, with an actionable message, when there is
+                    # no interactive terminal and no otp_callback to supply the code.
+                    try:
+                        _is_tty = sys.stdin.isatty()
+                    except Exception:
+                        _is_tty = False
+                    if not _is_tty:
+                        raise Doch1Error(
+                            "SMS code required but stdin is not a terminal "
+                            "(cron/CI/piped) and no otp_callback was given. "
+                            "Run `doch1 login` interactively, or provide a TOTP "
+                            "seed (DOCH1_TOTP_SEED).",
+                            auth_expired=False,
+                        )
                     code = input("Enter the SMS code sent to your phone: ").strip()
                 otc.fill(code)
                 try:
@@ -763,11 +798,7 @@ def login(
 
         # Wait until we're back on the authenticated app.
         page.wait_for_url(
-            lambda u: (
-                "one.prat.idf.il" in u
-                and "login.microsoftonline.com" not in u
-                and not u.rstrip("/").endswith("/login")
-            ),
+            lambda u: _is_app_url(u),
             timeout=timeout_s * 1000,
         )
         page.wait_for_timeout(2000)

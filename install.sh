@@ -7,21 +7,34 @@ cd "$PROJ_DIR"
 
 echo "==> Project: $PROJ_DIR"
 
+# Pin the uv installer to a known version (matches CI / release workflows) so a
+# compromised/MITM'd astral.sh CDN can't silently ship a different uv. Override
+# with UV_INSTALL_VERSION=... only if you know what you are doing.
+UV_INSTALL_VERSION="${UV_INSTALL_VERSION:-0.9.21}"
+
 # 1. uv present?
 if ! command -v uv >/dev/null 2>&1; then
-  echo "==> uv not found; installing..."
-  curl -LsSf https://astral.sh/uv/install.sh | sh
+  echo "==> uv not found; installing pinned version ${UV_INSTALL_VERSION}..."
+  # SECURITY: download the installer to a temp file FIRST (no blind curl|sh),
+  # so a human/CI can inspect or hash-pin it, then run the pinned version.
+  _uv_installer="$(mktemp)"
+  curl -LsSf "https://astral.sh/uv/${UV_INSTALL_VERSION}/install.sh" -o "$_uv_installer"
+  sh "$_uv_installer"
+  rm -f "$_uv_installer"
   export PATH="$HOME/.local/bin:$PATH"
 fi
 echo "==> uv $(uv --version)"
 
 # 2. Sync deps + create venv (locked, reproducible).
-echo "==> uv sync"
-uv sync
+#    --frozen: never re-resolve; fail if uv.lock drifted (preserves hash pinning).
+echo "==> uv sync --frozen"
+uv sync --frozen
 
 # 2b. Playwright Chromium (browser-session transport passes the Imperva WAF).
 echo "==> installing Chromium for Playwright"
 uv run playwright install chromium
+# Tighten perms on the downloaded browser binaries (default 0755 is world-readable).
+chmod -R go-rwx "$HOME/.cache/ms-playwright" 2>/dev/null || true
 
 # 3. .env scaffold.
 if [[ ! -f .env ]]; then
@@ -32,16 +45,19 @@ else
   echo "==> .env already exists; leaving untouched."
 fi
 
-# 4. Install cron jobs (daily 07:30 today + weekly Sun 07:40 week fill).
-#    Single source of truth: `doch1 cron install` builds/merges the crontab,
-#    carries the DOCH1_NONINTERACTIVE guard, and idempotently REPLACES stale
-#    tagged lines (fixes the old skip-if-tag-present staleness).
-if [[ "${1:-}" == "--no-cron" ]]; then
-  echo "==> --no-cron: skipping cron install. Install manually later with:"
-  echo "    uv run doch1 cron install"
-else
-  echo "==> Installing cron jobs via 'doch1 cron install'"
+# 4. Cron jobs are OPT-IN (daily 07:30 today + weekly Sun 07:40 week fill).
+#    SECURITY/ETHICS: the daily job files "present at base" on days the human
+#    has not confirmed (see LEGAL.md). It must therefore be an explicit choice,
+#    not a silent default. Pass --with-cron to install; otherwise we only PRINT
+#    the lines so you can review before opting in.
+if [[ "${1:-}" == "--with-cron" ]]; then
+  echo "==> --with-cron: installing cron jobs via 'doch1 cron install'"
   uv run doch1 cron install
+else
+  echo "==> Cron NOT installed (opt-in). The daily job reports presence"
+  echo "    automatically — review LEGAL.md, then enable with EITHER:"
+  echo "        ./install.sh --with-cron"
+  echo "        uv run doch1 cron install"
 fi
 
 echo

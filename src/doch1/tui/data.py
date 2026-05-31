@@ -54,6 +54,10 @@ def _scheduled_to_history_day(day: dict) -> api.HistoryDay | None:
     reportedStatusCode; they have no approved/determined status yet. Returns
     None when the date is missing/unparseable.
     """
+    # Untrusted server JSON via list_scheduled(): a malformed (non-dict) item
+    # must return None, not crash the TUI worker thread on .get().
+    if not isinstance(day, dict):
+        return None
     ds = day.get("date")
     if not ds:
         return None

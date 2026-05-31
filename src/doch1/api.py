@@ -48,10 +48,38 @@ class Doch1Error(RuntimeError):
 # ---------- config ----------
 
 
+def safe_override_path(value: str, *, var: str) -> Path:
+    """Validate an env-var-supplied file path against traversal / symlink attacks.
+
+    SECURITY: ``DOCH1_STATE`` / ``DOCH1_ENV`` let an operator relocate a secret
+    file, but an attacker with env control could otherwise (a) use ``..`` to
+    escape into a sensitive directory (e.g. ``DOCH1_ENV=../../etc/passwd`` ->
+    arbitrary file read), or (b) pre-plant a symlink at the target so the
+    eventual write follows it to a file outside the intended tree (defeating the
+    ``0o600`` hardening). We therefore:
+      - reject any literal ``..`` path segment, and
+      - reject a target reached through a symlink.
+    The path need not pre-exist (it's where we will write/read the file). We do
+    NOT force containment under ~/.config / the project dir, so an operator may
+    still point at an explicit absolute location — only the traversal/symlink
+    vectors are blocked.
+    """
+    if ".." in Path(value).parts:
+        raise Doch1Error(f"{var} must not contain '..' path segments: {value!r}")
+    try:
+        abs_lexical = os.path.abspath(value)
+        resolved = os.path.realpath(value)
+    except OSError as exc:  # pragma: no cover - pathological FS errors
+        raise Doch1Error(f"{var} path is unusable: {value!r}") from exc
+    if os.path.islink(value) or abs_lexical != resolved:
+        raise Doch1Error(f"{var} resolves through a symlink ({value!r} -> {resolved!r}); refusing.")
+    return Path(abs_lexical)
+
+
 def config_path() -> Path:
     override = os.environ.get("DOCH1_ENV")
     if override:
-        return Path(override)
+        return safe_override_path(override, var="DOCH1_ENV")
     return Path(__file__).resolve().parents[2] / ".env"
 
 
@@ -180,7 +208,16 @@ def scheduled_window(client, months: set[tuple[int, int]]):
             if exc.auth_expired:
                 raise  # don't mask a dead session as "no scheduled days"
             continue
-        for day in data.get("days", []):
+        if not isinstance(data, dict):
+            continue
+        days = data.get("days")
+        if not isinstance(days, list):
+            continue
+        for day in days:
+            # Untrusted server JSON: a non-dict element (e.g. {"days":"str"} ->
+            # iterating chars, or [1,2,3]) must be skipped, not crash on .get().
+            if not isinstance(day, dict):
+                continue
             d_parsed = _parse_server_date(day.get("date"))
             if d_parsed is None:
                 continue
@@ -213,7 +250,16 @@ class HistoryDay:
 def member_history(client, month: int, year: int) -> list[HistoryDay]:
     data = client.post_json(P_HISTORY, {"month": month, "year": year})
     out: list[HistoryDay] = []
-    for d in data.get("days", []):
+    if not isinstance(data, dict):
+        return out
+    days = data.get("days")
+    if not isinstance(days, list):
+        return out
+    for d in days:
+        # Untrusted server JSON: skip non-dict day records instead of crashing
+        # on .get() (e.g. {"days":123} or {"days":"str"}).
+        if not isinstance(d, dict):
+            continue
         d_parsed = _parse_server_date(d.get("date"))
         if d_parsed is None:
             continue

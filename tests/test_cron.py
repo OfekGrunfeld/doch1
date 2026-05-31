@@ -148,6 +148,9 @@ def test_cli_install_writes_merged_crontab(monkeypatch):
     captured = {}
     monkeypatch.setattr(cli, "_crontab_read", lambda: "")
     monkeypatch.setattr(cli, "_crontab_write", lambda text: captured.update(text=text))
+    # Don't touch the real tree: the 0o600 log pre-create is covered separately
+    # in test_security_deep_remediation.py.
+    monkeypatch.setattr(cli, "_precreate_cron_log", lambda path: None)
     monkeypatch.setattr(cli, "_cfg", lambda: {})
 
     result = CliRunner().invoke(cli.app, ["cron", "install"])

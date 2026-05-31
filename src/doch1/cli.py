@@ -20,7 +20,7 @@ from datetime import date, datetime
 
 import typer
 
-from . import api, render, statuses
+from . import api, observability, render, statuses
 from . import cron as cron_mod
 from .dates import default_week_anchor
 
@@ -76,6 +76,38 @@ def _client(cfg: dict[str, str]):
     )
 
 
+def _transport_label() -> str | None:
+    """SAFE transport name for observability: 'browser' or 'cookie' (never the
+    cookie/token VALUE). None if neither is configured."""
+    from .session import state_path
+
+    if state_path().exists():
+        return "browser"
+    if _cfg().get("DOCH1_COOKIE"):
+        return "cookie"
+    return None
+
+
+def _log_outcome(
+    command: str,
+    timer: observability.RunTimer,
+    *,
+    ok: bool,
+    auth_expired: bool = False,
+    category: str | None = None,
+) -> None:
+    """Emit ONE secret-safe observability line for a command outcome (no-op
+    unless DOCH1_LOG is enabled). Passes only a category, never raw error text."""
+    observability.log_run(
+        command,
+        ok=ok,
+        reason=observability.classify_reason(ok=ok, auth_expired=auth_expired, category=category),
+        duration_ms=timer.ms(),
+        transport=_transport_label(),
+        auth_expired=auth_expired,
+    )
+
+
 def _sanitize_alert(text: str) -> str:
     """Strip anything that could carry raw server bodies / tracebacks out of an
     outbound Telegram message.
@@ -100,6 +132,11 @@ def _alert_text(command: str, *, auth_expired: bool = False) -> str:
     return f"⚠️ DOCH1 {command} FAILED: {reason}"
 
 
+# Pinned Telegram host — never interpolated/overridable, so the bot token can
+# only ever be sent to the real api.telegram.org.
+_TELEGRAM_API = "https://api.telegram.org"
+
+
 def _alert(cfg: dict[str, str], text: str) -> None:
     import requests
 
@@ -108,9 +145,12 @@ def _alert(cfg: dict[str, str], text: str) -> None:
         return
     try:
         requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
+            f"{_TELEGRAM_API}/bot{token}/sendMessage",
             data={"chat_id": chat_id, "text": _sanitize_alert(text)},
             timeout=15,
+            # SECURITY: never follow a redirect — a MITM 30x could otherwise
+            # replay the bot-token-bearing URL (and Referer) to an attacker host.
+            allow_redirects=False,
         )
     except requests.RequestException:
         pass
@@ -215,11 +255,13 @@ def today(
 ):
     """Report TODAY (default: present at base 01/01)."""
     cfg = _cfg()
+    _t0 = observability.RunTimer()
     try:
         sel = _resolve_status(cfg, status_key)
         with _client(cfg) as client:
             ok = api.report_today(client, sel)
     except api.Doch1Error as e:
+        _log_outcome("today", _t0, ok=False, auth_expired=e.auth_expired)
         raise _fail(
             cfg,
             "today",
@@ -229,6 +271,7 @@ def today(
             auth_expired=e.auth_expired,
         ) from e
     if not ok:
+        _log_outcome("today", _t0, ok=False, category="rejected")
         raise _fail(
             cfg,
             "today",
@@ -236,6 +279,7 @@ def today(
             json_out=json_out,
             alert="⚠️ DOCH1 today FAILED: report rejected",
         )
+    _log_outcome("today", _t0, ok=True)
     if json_out:
         typer.echo(
             _json.dumps(
@@ -310,9 +354,11 @@ def week(
 ):
     """Fill the Sun-Sat week: today + remaining future days; skip filled/past."""
     cfg = _cfg()
+    _t0 = observability.RunTimer()
     try:
         a = _parse_date(anchor) if anchor else default_week_anchor()
     except ValueError as e:
+        _log_outcome("week", _t0, ok=False, category="bad_input")
         raise _fail(cfg, "week", str(e), json_out=json_out) from e
     try:
         sel = _resolve_status(cfg, status_key)
@@ -323,6 +369,7 @@ def week(
         with _client(cfg) as client:
             results, failures = fill_week_plan(client, days, date.today(), status=sel)
     except api.Doch1Error as e:
+        _log_outcome("week", _t0, ok=False, auth_expired=e.auth_expired)
         raise _fail(
             cfg,
             "week",
@@ -339,8 +386,10 @@ def week(
     else:
         render.render_week(console, results, status=sel)
     if failures:
+        _log_outcome("week", _t0, ok=False, category="rejected")
         _alert(cfg, "⚠️ DOCH1 week-fill failures: " + ", ".join(failures))
         raise typer.Exit(code=1)
+    _log_outcome("week", _t0, ok=True)
 
 
 @app.command()
@@ -354,12 +403,14 @@ def history(
 ):
     """View PAST reports for a month (reported vs approved, flags, notes)."""
     cfg = _cfg()
+    _t0 = observability.RunTimer()
     now = date.today()
     m, y = month or now.month, year or now.year
     try:
         with _client(cfg) as client:
             days = api.member_history(client, m, y)
     except api.Doch1Error as e:
+        _log_outcome("history", _t0, ok=False, auth_expired=e.auth_expired)
         raise _fail(
             cfg,
             "history",
@@ -370,6 +421,7 @@ def history(
         ) from e
     if conflicts_only:
         days = [d for d in days if d.conflict]
+    _log_outcome("history", _t0, ok=True)
 
     if json_out:
         typer.echo(
@@ -489,6 +541,33 @@ def _py() -> str:
     return venv if os.path.exists(venv) else sys.executable
 
 
+def _precreate_cron_log(log_path: str) -> None:
+    """Create doch1.log at 0o600 before cron starts appending to it.
+
+    SECURITY:
+      - The cron job appends with the shell's default umask, which typically
+        leaves doch1.log world-readable — leaking presence cadence / timing /
+        error diagnostics to any local user. Pre-creating it 0o600 closes that.
+      - An attacker could pre-plant a SYMLINK at doch1.log (e.g. -> ~/.ssh/
+        authorized_keys) so cron's ``>>`` writes through it. Refuse to proceed
+        if the path is a symlink.
+    """
+    if os.path.islink(log_path):
+        raise api.Doch1Error(
+            f"Refusing to use {log_path}: it is a symlink (possible attack). Remove it and re-run."
+        )
+    # O_NOFOLLOW: if it becomes a symlink between the check and the open, fail.
+    flags = os.O_CREAT | os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(log_path, flags, 0o600)
+    except OSError as e:
+        raise api.Doch1Error(f"Could not create log file {log_path}: {e}") from e
+    try:
+        os.fchmod(fd, 0o600)
+    finally:
+        os.close(fd)
+
+
 def _crontab_read() -> str:
     """Return the current user crontab text ('' if none / no crontab)."""
     import subprocess
@@ -526,9 +605,18 @@ def cron_install(
 ):
     """Install (or update) the auto-fill cron jobs. Idempotent."""
     cfg = _cfg()
-    lines = cron_mod.build_lines(
-        _proj_dir(), _py(), daily=daily, weekly=weekly, with_weekly=not no_weekly
-    )
+    try:
+        lines = cron_mod.build_lines(
+            _proj_dir(), _py(), daily=daily, weekly=weekly, with_weekly=not no_weekly
+        )
+    except ValueError as e:
+        # Reject an injected/malformed --daily/--weekly schedule cleanly instead
+        # of letting it reach the crontab (line-injection guard).
+        raise _fail(cfg, "cron install", str(e), json_out=json_out) from e
+    try:
+        _precreate_cron_log(os.path.join(_proj_dir(), "doch1.log"))
+    except api.Doch1Error as e:
+        raise _fail(cfg, "cron install", str(e), json_out=json_out) from e
     try:
         merged = cron_mod.merge(_crontab_read(), lines)
         _crontab_write(merged)
@@ -642,6 +730,7 @@ def statuses_cmd(
 def status(json_out: bool = typer.Option(False, "--json")):
     """Check whether the saved session is still valid."""
     cfg = _cfg()
+    _t0 = observability.RunTimer()
     from .session import state_path
 
     try:
@@ -649,11 +738,13 @@ def status(json_out: bool = typer.Option(False, "--json")):
             api.list_scheduled(client, date.today().month, date.today().year)
         ok = True
     except api.Doch1Error as e:
+        _log_outcome("status", _t0, ok=False, auth_expired=e.auth_expired)
         if json_out:
             typer.echo(_json.dumps({"command": "status", "authenticated": False, "error": str(e)}))
         else:
             render.render_status(console, False, error=str(e))
         raise typer.Exit(code=1) from e
+    _log_outcome("status", _t0, ok=True)
     src = "browser-session" if state_path().exists() else "cookie"
     if json_out:
         typer.echo(_json.dumps({"command": "status", "authenticated": ok, "transport": src}))

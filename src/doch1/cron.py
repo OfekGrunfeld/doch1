@@ -19,6 +19,9 @@ for the weekly ``doch1 week`` line which is not ``python -m doch1.main``.
 
 from __future__ import annotations
 
+import re
+import shlex
+
 # Keep the daily tag identical to install.sh for continuity with any crontab
 # that the old installer already wrote.
 TAG_DAILY = "# doch1-auto-report"
@@ -27,17 +30,46 @@ TAG_WEEKLY = "# doch1-auto-week"
 DEFAULT_DAILY = "30 7 * * *"
 DEFAULT_WEEKLY = "40 7 * * 0"  # Sunday 07:40 — see dates.default_week_anchor
 
+# A cron schedule is 5 whitespace-separated fields, each built only from
+# digits and the cron metacharacters ``* , / -``. This rejects newlines (the
+# crontab line-injection vector), shell metacharacters, and any command text.
+_CRON_FIELD = r"[0-9*]+(?:[-,/][0-9*]+)*"
+_CRON_SCHEDULE_RE = re.compile(r"^\s*" + r"\s+".join([_CRON_FIELD] * 5) + r"\s*$")
+
+
+def _validate_schedule(expr: str, *, field: str) -> str:
+    """Return a normalized cron schedule or raise ValueError.
+
+    SECURITY: ``--daily``/``--weekly`` flow straight into a crontab line. A value
+    like ``$'30 7 * * *\\n* * * * * /bin/sh -i'`` would otherwise inject an extra
+    crontab line -> arbitrary command execution. We reject anything that is not
+    exactly five clean cron fields (no newlines, no shell metacharacters).
+    """
+    if not isinstance(expr, str) or not _CRON_SCHEDULE_RE.match(expr):
+        raise ValueError(
+            f"Invalid cron schedule for {field}: {expr!r}. "
+            "Expected five fields of digits and * , / - only."
+        )
+    return " ".join(expr.split())
+
 
 def _command(proj_dir: str, py: str, *, env: dict[str, str], run: str) -> str:
     """Build the shell command (without the leading cron schedule).
 
     Exports the non-interactive guards (plus any caller env) then cd's into the
     project, runs the module invocation, and appends to the log.
+
+    SECURITY: ``proj_dir``, ``py``, the log path and every env value are
+    ``shlex.quote``-d so a path containing spaces or shell metacharacters (e.g.
+    ``/opt/my doch1/``) cannot word-split or inject commands into the cron line.
     """
     exports = {"DOCH1_NONINTERACTIVE": "1", "DOCH1_CRON": "1"}
     exports.update(env or {})
-    env_str = " ".join(f"{k}={v}" for k, v in exports.items())
-    return f"cd {proj_dir} && {env_str} {py} {run} >> {proj_dir}/doch1.log 2>&1"
+    env_str = " ".join(f"{shlex.quote(k)}={shlex.quote(v)}" for k, v in exports.items())
+    q_proj = shlex.quote(proj_dir)
+    q_py = shlex.quote(py)
+    q_log = shlex.quote(f"{proj_dir}/doch1.log")
+    return f"cd {q_proj} && {env_str} {q_py} {run} >> {q_log} 2>&1"
 
 
 def build_lines(
@@ -56,6 +88,8 @@ def build_lines(
     Both lines carry the DOCH1_NONINTERACTIVE / DOCH1_CRON guards.
     """
     env = env or {}
+    daily = _validate_schedule(daily, field="--daily")
+    weekly = _validate_schedule(weekly, field="--weekly")
     lines: list[tuple[str, str]] = []
     daily_cmd = _command(proj_dir, py, env=env, run="-m doch1.main")
     lines.append((TAG_DAILY, f"{daily} {daily_cmd}"))
