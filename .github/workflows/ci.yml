@@ -39,12 +39,25 @@ jobs:
           version: "0.9.21"
           python-version: ${{ matrix.python-version }}
 
+      # Fail fast if uv.lock drifted from pyproject.toml — a drifted/absent lock
+      # would let `uv sync` silently re-resolve to new versions+hashes, defeating
+      # the hash pinning. Runs before sync so a bad lock can't be installed.
+      - name: lockfile is in sync
+        if: matrix.python-version == '3.13'
+        run: uv lock --check
+
       # Locked, reproducible deps from uv.lock (--frozen: never re-resolve).
       # NO `playwright install` — CI never launches a browser. sync_playwright()
       # is lazy inside BrowserClient.__enter__ / login(), and every test uses
       # FakeClient / FakePage doubles instead.
       - name: sync (dev extras, locked, no browser)
         run: uv sync --extra dev --frozen
+
+      # Supply-chain gate: flag any dependency with a known CVE. Audits the
+      # locked, installed set on a single leg.
+      - name: pip-audit (known-vuln deps)
+        if: matrix.python-version == '3.13'
+        run: uv run --with pip-audit pip-audit
 
       # Static checks run on ONE leg only (3.13) — they are version-invariant,
       # so running them on both legs is pure 2x redundancy.

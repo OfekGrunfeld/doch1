@@ -1,0 +1,24 @@
+version: 2
+updates:
+  # Keep GitHub Actions SHA pins fresh — without this, even SHA-pinned actions
+  # silently rot and miss upstream security fixes. Dependabot proposes the new
+  # SHA + version comment in a reviewable PR.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "security"
+
+  # Python deps (uv.lock via pip ecosystem) — surfaces vulnerable transitive
+  # dependencies as PRs against the lockfile.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "security"
