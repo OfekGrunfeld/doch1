@@ -334,6 +334,40 @@ logs stay plain text.
 
 Omit both → alerts disabled (failures still exit non-zero and log).
 
+### Run-logging / observability (optional, OFF by default)
+
+doch1 can record **one structured JSON line per run** so you can see *that* a
+command ran and *how it ended* — without ever logging a secret. It is **opt-in**
+and writes nothing unless you enable it.
+
+```bash
+DOCH1_LOG=1 doch1 today          # appends one JSON line to doch1.log
+```
+
+| Env var | Effect |
+|---|---|
+| `DOCH1_LOG=1` (or `true`/`yes`) | Enable run-logging. **Default OFF.** |
+| `DOCH1_LOG_FILE=/path/doch1.log` | Override the log path. Default: `<project>/doch1.log` (the same file cron appends to). |
+
+Each line is a closed, secret-free schema:
+
+```json
+{"ts":"2026-05-30T21:19:14+00:00","command":"today","result":"fail","reason":"auth_expired","duration_ms":42,"transport":"browser","auth_expired":true}
+```
+
+- `result` — `ok` | `fail`
+- `reason` — a **category**, never raw server/exception text: one of
+  `ok, auth_expired, rejected, bad_input, no_session, transport_error, error`
+- `transport` — `browser` | `cookie` (the *kind*, never the cookie/token value)
+
+**Privacy guarantees** (honors the security audit): the line **never** contains a
+password, cookie, token, OTP/TOTP seed, account id, username, chat id, dates,
+statuses, or any raw server body. The schema is closed (only the keys above), the
+failure reason is a coarse category, and every line passes a tripwire sweep that
+makes the write *fail loudly* rather than emit a value matching any configured
+secret. The log file is created at mode `0o600` (not world-readable). Wired into
+the `today`, `week`, `history`, and `status` command outcomes.
+
 ---
 
 ## Status check & troubleshooting
